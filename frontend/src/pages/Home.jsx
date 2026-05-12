@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Input, Select, Card, Tag, Empty, Spin, Row, Col, Pagination, App, Dropdown, Modal, Form, Button, Space } from 'antd'
 import {
   SearchOutlined, BookOutlined, DeleteOutlined, FolderOutlined,
-  PlusOutlined, EditOutlined, SwapOutlined, MoreOutlined
+  PlusOutlined, SwapOutlined, MoreOutlined
 } from '@ant-design/icons'
 import { booksAPI } from '../api'
 
@@ -262,12 +262,12 @@ export default function Home() {
                   hoverable
                   onClick={() => navigate(`/book/${book.id}`)}
                   style={{ borderRadius: 12, overflow: 'hidden', position: 'relative' }}
-                  bodyStyle={{ padding: 12 }}
+                  styles={{ body: { padding: 12 } }}
                   cover={
                     <div style={{
                       height: 200, background: book.cover_url
                         ? `url(${book.cover_url}) center/cover`
-                        : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                        : 'var(--cover-placeholder)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center'
                     }}>
                       {!book.cover_url && (

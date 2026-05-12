@@ -133,7 +133,6 @@ export default function Sources() {
     try {
       await booksAPI.setProxies(proxies)
       message.success(`代理池已更新，共 ${proxies.length} 个代理`)
-      setProxyModalOpen(false)
       proxyForm.resetFields()
       loadCrawlStatus()
     } catch (err) {

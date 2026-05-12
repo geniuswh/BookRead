@@ -610,10 +610,9 @@ _NOVEL_SITE_KEYWORDS = [
     'zanghai', 'vivila', 'aixiax', 'xiaoshuo', 'novel', 'biqugla',
     'ranwen', 'easysoso', 'xxsy', 'faloo', 'shuba', 'shuqi',
     'biqugn', 'biqugegg', 'yixiangxws', 'xsw', 'zwdu', 'znlzd',
-    'mishi', 'gdbzkz', 'xsbiquge', 'biquw', 'paoshu8', 'wanben',
-    'lkshu', 'shuquge', 'boquge', 'uushu', 'aishu', 'dshu',
-    'tianxiabook', 'biquwx', 'xiaoqiaxs', 'bqgxsw', '69shu',
-    'biqugse', 'biqiuge', 'xbiqugu', 'xbiquge', '8novel',
+    'mishi', 'gdbzkz', 'xsbiquge', 'lkshu', 'shuquge',
+    'uushu', 'aishu', 'dshu', 'tianxiabook', 'xiaoqiaxs',
+    'bqgxsw', '69shu', '8novel',
 ]
 
 # 明确排除的域名（正版/大平台/内容站/非小说站）
@@ -712,7 +711,7 @@ def _resolve_baidu_link(baidu_url):
     """解析百度跳转链接，获取真实目标URL"""
     try:
         resp = requests.get(baidu_url, timeout=5, allow_redirects=True,
-                           headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
+                           headers={'User-Agent': anti_block._get_random_ua()})
         final_url = resp.url
         if 'baidu.com' in final_url:
             return None
@@ -745,13 +744,6 @@ def _extract_source_name(hostname):
         if len(main_part) <= 2 and len(parts) >= 3:
             main_part = parts[-3] if len(parts[-3]) > len(main_part) else main_part
         return main_part
-    return hostname
-    """提取主域名，如 www.xbiquge.la -> xbiquge.la, m.easysoso.cn -> easysoso.cn"""
-    if not hostname:
-        return ''
-    parts = hostname.replace('www.', '').replace('m.', '').replace('wap.', '').split('.')
-    if len(parts) >= 2:
-        return '.'.join(parts[-2:])
     return hostname
 
 

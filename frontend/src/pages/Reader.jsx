@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Button, Slider, Select, Switch, Popover, App, Spin } from 'antd'
+import { Button, Slider, Select, Popover, App, Spin } from 'antd'
 import {
-  ArrowLeftOutlined, ArrowLeftOutlined as PrevOutlined,
-  ArrowRightOutlined, SettingOutlined, MenuOutlined,
-  FontSizeOutlined, ColumnWidthOutlined
+  ArrowLeftOutlined,
+  ArrowRightOutlined, SettingOutlined, MenuOutlined
 } from '@ant-design/icons'
 import { readerAPI } from '../api'
 
@@ -30,7 +29,8 @@ export default function Reader() {
   const navigate = useNavigate()
   const { message } = App.useApp()
   const contentRef = useRef(null)
-  const saveTimerRef = useRef(null)
+  const prefTimerRef = useRef(null)
+  const scrollTimerRef = useRef(null)
 
   const [chapter, setChapter] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -91,8 +91,8 @@ export default function Reader() {
     const newPrefs = { ...prefs, [key]: value }
     setPrefs(newPrefs)
     // 防抖保存
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => savePrefs(newPrefs), 1000)
+    if (prefTimerRef.current) clearTimeout(prefTimerRef.current)
+    prefTimerRef.current = setTimeout(() => savePrefs(newPrefs), 1000)
   }
 
   const handleScroll = useCallback(() => {
@@ -100,11 +100,19 @@ export default function Reader() {
     const el = contentRef.current
     const scrollPercent = el.scrollTop / (el.scrollHeight - el.clientHeight)
     // 防抖保存滚动位置
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => {
+    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current)
+    scrollTimerRef.current = setTimeout(() => {
       readerAPI.saveProgress(bookId, { scroll_position: scrollPercent }).catch(() => {})
     }, 2000)
   }, [bookId])
+
+  // 组件卸载时清理定时器
+  useEffect(() => {
+    return () => {
+      if (prefTimerRef.current) clearTimeout(prefTimerRef.current)
+      if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current)
+    }
+  }, [])
 
   // 恢复滚动位置
   useEffect(() => {
@@ -122,6 +130,7 @@ export default function Reader() {
   }, [chapter])
 
   const theme = THEMES[prefs.theme] || THEMES.light
+  const isDarkTheme = prefs.theme === 'dark' || prefs.theme === 'gray'
 
   const renderContent = () => {
     if (!chapter?.content) return '内容为空'
@@ -217,7 +226,7 @@ export default function Reader() {
       {/* 顶部工具栏 */}
       <div style={{
         position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
-        background: theme.bg, borderBottom: `1px solid ${prefs.theme === 'dark' || prefs.theme === 'gray' ? '#333' : '#e2e8f0'}`,
+        background: theme.bg, borderBottom: `1px solid ${isDarkTheme ? '#333' : '#e2e8f0'}`,
         padding: '8px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         transition: 'background 0.3s'
       }}>
@@ -263,7 +272,7 @@ export default function Reader() {
       {/* 底部导航 */}
       <div style={{
         position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 100,
-        background: theme.bg, borderTop: `1px solid ${prefs.theme === 'dark' || prefs.theme === 'gray' ? '#333' : '#e2e8f0'}`,
+        background: theme.bg, borderTop: `1px solid ${isDarkTheme ? '#333' : '#e2e8f0'}`,
         padding: '8px 16px', display: 'flex', justifyContent: 'center', gap: 16,
         transition: 'background 0.3s'
       }}>

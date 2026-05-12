@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import or_
+from datetime import datetime
 import time
 
 from __init__ import db
@@ -92,6 +93,11 @@ def delete_source(source_id):
     if not source:
         return jsonify(msg='书源不存在'), 404
 
+    # 级联删除：先删除书源下所有书籍的章节和阅读进度
+    books = Book.query.filter_by(source_id=source_id).all()
+    for book in books:
+        Chapter.query.filter_by(book_id=book.id).delete()
+        ReadingProgress.query.filter_by(book_id=book.id).delete()
     Book.query.filter_by(source_id=source_id).delete()
     db.session.delete(source)
     db.session.commit()
@@ -139,7 +145,7 @@ def crawl_source(source_id):
         data = request.get_json(silent=True) or {}
         speed = data.get('speed', 'normal')
         result = crawl_book_source(source, speed=speed)
-        source.last_crawled = db.func.now()
+        source.last_crawled = datetime.utcnow()
         db.session.commit()
         return jsonify(msg=f'成功爬取 {result["book_count"]} 本书，{result["chapter_count"]} 个章节', data=result)
     except Exception as e:

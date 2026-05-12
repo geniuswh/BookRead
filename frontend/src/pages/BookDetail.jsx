@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Card, List, Button, Tag, Spin, App, Descriptions, Dropdown, Modal, Space, Empty } from 'antd'
-import { ArrowLeftOutlined, ReadOutlined, BookOutlined, SwapOutlined, MoreOutlined, FolderOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, ReadOutlined, BookOutlined, SwapOutlined, MoreOutlined } from '@ant-design/icons'
 import { booksAPI, readerAPI } from '../api'
 
 export default function BookDetail() {
@@ -142,7 +142,7 @@ export default function BookDetail() {
             width: 160, height: 220, borderRadius: 8, flexShrink: 0,
             background: book.cover_url
               ? `url(${book.cover_url}) center/cover`
-              : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              : 'var(--cover-placeholder)',
             display: 'flex', alignItems: 'center', justifyContent: 'center'
           }}>
             {!book.cover_url && <BookOutlined style={{ fontSize: 48, color: 'rgba(255,255,255,0.6)' }} />}

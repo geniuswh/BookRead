@@ -42,16 +42,13 @@ export default function SearchPage() {
         source_name: item.source_name,
         title: item.title
       })
-      if (status === 200) {
-        message.info(data.msg || '该书已在书架中')
-        if (data.book_id) {
-          navigate(`/book/${data.book_id}`)
-        }
-      } else {
+      if (status === 201) {
         message.success(data.msg || '添加成功')
-        if (data.book_id) {
-          navigate(`/book/${data.book_id}`)
-        }
+      } else {
+        message.info(data.msg || '该书已在书架中')
+      }
+      if (data.book_id) {
+        navigate(`/book/${data.book_id}`)
       }
     } catch (err) {
       message.error(err.response?.data?.msg || '添加失败')
@@ -102,13 +99,13 @@ export default function SearchPage() {
                 <Card
                   hoverable
                   style={{ borderRadius: 12, height: '100%', position: 'relative' }}
-                  bodyStyle={{ padding: 16 }}
+                  styles={{ body: { padding: 16 } }}
                   cover={
                     <div style={{
                       height: 180,
                       background: item.cover_url
                         ? `url(${item.cover_url}) center/cover`
-                        : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                        : 'var(--cover-placeholder)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       borderRadius: '12px 12px 0 0'
                     }}>

@@ -1,4 +1,5 @@
 import os
+import logging
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
@@ -17,7 +18,13 @@ def create_app():
     app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'bookread-secret-key-change-in-prod')
     app.config['JSON_AS_ASCII'] = False
 
-    CORS(app, supports_credentials=True, origins=['http://localhost:5173'])
+    # 生产环境安全检查
+    if app.config['JWT_SECRET_KEY'] == 'bookread-secret-key-change-in-prod':
+        logging.warning('⚠️ JWT_SECRET_KEY 使用默认值，请在生产环境中设置环境变量！')
+
+    # CORS：支持环境变量配置，默认允许本地开发
+    cors_origins = os.environ.get('CORS_ORIGINS', 'http://localhost:5173').split(',')
+    CORS(app, supports_credentials=True, origins=[o.strip() for o in cors_origins])
     db.init_app(app)
     jwt.init_app(app)
 
