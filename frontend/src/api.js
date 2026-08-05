@@ -39,7 +39,7 @@ export const booksAPI = {
     addSource: (data) => api.post('/books/sources', data),
     updateSource: (id, data) => api.put(`/books/sources/${id}`, data),
     deleteSource: (id) => api.delete(`/books/sources/${id}`),
-    crawlSource: (id, speed) => api.post(`/books/sources/${id}/crawl`, speed ? { speed } : {}),
+    crawlSource: (id, speed) => api.post(`/books/sources/${id}/crawl`, speed ? { speed } : {}, { timeout: 600000 }),
     getBooks: (params) => api.get('/books/list', { params }),
     getBook: (id) => api.get(`/books/${id}`),
     deleteBook: (id) => api.delete(`/books/${id}`),
@@ -60,6 +60,8 @@ export const booksAPI = {
     updateGroup: (id, data) => api.put(`/books/groups/${id}`, data),
     deleteGroup: (id) => api.delete(`/books/groups/${id}`),
     setBookGroup: (bookId, data) => api.put(`/books/${bookId}/group`, data),
+    // 导出TXT
+    exportBookTxt: (bookId) => api.get(`/books/${bookId}/export`, { timeout: 300000, responseType: 'blob' }),
 }
 
 // Reader

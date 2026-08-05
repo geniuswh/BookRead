@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Card, List, Button, Tag, Spin, App, Descriptions, Dropdown, Modal, Space, Empty } from 'antd'
-import { ArrowLeftOutlined, ReadOutlined, BookOutlined, SwapOutlined, MoreOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, ReadOutlined, BookOutlined, SwapOutlined, MoreOutlined, DownloadOutlined } from '@ant-design/icons'
 import { booksAPI, readerAPI } from '../api'
 
 export default function BookDetail() {
@@ -98,12 +98,38 @@ export default function BookDetail() {
     }
   }
 
+  const handleDownloadTxt = async () => {
+    const hide = message.loading(`正在生成《${book?.title}》TXT，请稍候...`, 0)
+    try {
+      const { data } = await booksAPI.exportBookTxt(id)
+      const url = URL.createObjectURL(data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${book?.title}.txt`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      message.success('下载成功')
+    } catch (err) {
+      message.error(err.response?.data?.msg || '下载失败')
+    } finally {
+      hide()
+    }
+  }
+
   const menuItems = [
     {
       key: 'switch',
       icon: <SwapOutlined />,
       label: '搜索换源',
       onClick: handleSearchSources
+    },
+    {
+      key: 'download',
+      icon: <DownloadOutlined />,
+      label: '下载TXT',
+      onClick: handleDownloadTxt
     },
     { type: 'divider' },
     ...groups.length > 0 ? [{

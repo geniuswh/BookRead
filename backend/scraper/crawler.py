@@ -1,6 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 import time
 import random
@@ -215,6 +216,76 @@ class AntiBlockSession:
 
 # 全局反封禁会话
 anti_block = AntiBlockSession()
+
+# ===== 菠萝猫登录会话 =====
+_boluomao_session = None  # 登录后的 requests.Session（带 cookie）
+_BOLUOMAO_LOGIN_URL = 'https://www.boluomao1.com'
+
+
+def boluomao_login(username, password, base_url='https://www.boluomao1.com'):
+    """
+    登录菠萝猫站点（自动识别验证码），成功后保存登录会话供章节爬取使用。
+    返回 (bool, str) 是否成功及提示信息。
+    """
+    global _boluomao_session
+    try:
+        import re as _re
+        import requests as _requests
+        import ddddocr
+    except ImportError as e:
+        return False, f'缺少依赖: {e}，请先 pip install ddddocr'
+
+    ocr = ddddocr.DdddOcr(show_ad=False)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': base_url + '/user/login/',
+        'X-Requested-With': 'XMLHttpRequest'
+    }
+
+    for attempt in range(10):
+        s = _requests.Session()
+        s.headers.update(headers)
+        try:
+            s.get(base_url + '/user/login/', timeout=15)
+            cap = s.get(base_url + '/api/captcha.php', timeout=15)
+            raw = ocr.classification(cap.content)
+            captcha = _re.sub(r'[^0-9A-Za-z]', '', raw)
+            if len(captcha) != 4:
+                continue
+            r = s.post(base_url + '/api/auth.php', data={
+                'action': 'login',
+                'mobile': username,
+                'password': password,
+                'captcha': captcha
+            }, timeout=15)
+            res = r.json()
+            if res.get('code') == 0:
+                _boluomao_session = s
+                logger.info(f"Boluomao login success (attempt {attempt+1})")
+                return True, '登录成功'
+        except Exception as e:
+            logger.warning(f"Boluomao login attempt {attempt+1} failed: {e}")
+    return False, '登录失败：验证码识别多次失败，请检查账号或稍后重试'
+
+
+def boluomao_logout():
+    """清除菠萝猫登录会话"""
+    global _boluomao_session
+    _boluomao_session = None
+
+
+def boluomao_is_logged_in():
+    return _boluomao_session is not None
+
+
+def _boluomao_get(url, referer=None, timeout=15):
+    """菠萝猫请求：优先使用登录会话，否则用反封禁会话"""
+    if _boluomao_session is not None:
+        headers = {}
+        if referer:
+            headers['Referer'] = referer
+        return _boluomao_session.get(url, headers=headers, timeout=timeout)
+    return anti_block.get(url, referer=referer, timeout=timeout)
 
 
 def set_proxies(proxy_list):
@@ -485,7 +556,215 @@ class GenericNovelAdapter(BaseSiteAdapter):
             return 'gbk'
 
 
-ADAPTERS = [BiqugeAdapter(), TianyaAdapter(), GenericNovelAdapter()]
+def _boluomao_decode(obf_str):
+    """解密菠萝猫站点的正文混淆内容。
+    算法与站点前端 JS 一致：base64 解码 -> 每字节 XOR ((i % 127) + 1) -> UTF-8
+    """
+    try:
+        import base64
+        raw = base64.b64decode(obf_str)
+        out = bytearray(len(raw))
+        for i in range(len(raw)):
+            out[i] = raw[i] ^ ((i % 127) + 1)
+        return out.decode('utf-8', errors='replace')
+    except Exception:
+        return ''
+
+
+class BoluomaoAdapter(BaseSiteAdapter):
+    """菠萝猫 (boluomao) 站点适配器"""
+    MAX_BOOKS_FROM_HOME = 20
+    # 并发解析书籍数（I/O 密集，多线程可显著提速；登录态下可适度提高）
+    CONCURRENCY = 5
+
+    def detect(self, url):
+        hostname = (urlparse(url).hostname or '').lower()
+        return 'boluomao' in hostname
+
+    def parse(self, source):
+        url = source.url
+
+        # 若传入的是章节页，还原为书籍页
+        m = re.search(r'/book/(\d+)(?:\.html)?', url)
+        if not m:
+            m = re.search(r'/read/(\d+)/', url)
+        if m:
+            url = f'https://{urlparse(url).hostname}/book/{m.group(1)}.html'
+
+        # 若传入的是首页/列表页，收集书籍链接并发解析
+        if not re.search(r'/book/\d+', url):
+            book_links = self._collect_book_links(url)
+            targets = book_links[:self.MAX_BOOKS_FROM_HOME]
+            books = []
+            if len(targets) <= 1:
+                for bl in targets:
+                    info = self._parse_book_page(bl)
+                    if info:
+                        books.append(info)
+            else:
+                # 线程池并发解析（借鉴 Scrapy/多线程爬虫思路）
+                with ThreadPoolExecutor(max_workers=self.CONCURRENCY) as executor:
+                    futures = {executor.submit(self._parse_book_page, bl): bl for bl in targets}
+                    for fut in as_completed(futures):
+                        try:
+                            info = fut.result()
+                        except Exception as e:
+                            logger.warning(f"Boluomao concurrent parse failed {futures[fut]}: {e}")
+                            info = None
+                        if info:
+                            books.append(info)
+            return {'books': books}
+
+        info = self._parse_book_page(url)
+        return {'books': [info] if info else []}
+
+    def _collect_book_links(self, url):
+        """从首页/列表页收集书籍链接"""
+        links = []
+        try:
+            resp = _boluomao_get(url, timeout=15)
+            resp.encoding = 'utf-8'
+            soup = BeautifulSoup(resp.text, 'lxml')
+            base_host = urlparse(url).scheme + '://' + (urlparse(url).hostname or '')
+            for a in soup.select('a[href*="/book/"]'):
+                href = a.get('href', '')
+                m = re.search(r'/book/\d+\.html', href)
+                if not m:
+                    continue
+                full = href if href.startswith('http') else base_host + href
+                if full not in links:
+                    links.append(full)
+        except Exception as e:
+            logger.warning(f"Boluomao collect book links failed {url}: {e}")
+        return links
+
+    def _parse_book_page(self, url):
+        """解析单本书籍页（含分页章节）"""
+        # 增量优化：已入库的书籍跳过详细解析
+        existing_urls = getattr(self, '_existing_urls', None)
+        if existing_urls is not None and url in existing_urls:
+            return None
+        try:
+            resp = _boluomao_get(url, timeout=15)
+            resp.encoding = 'utf-8'
+        except Exception as e:
+            logger.warning(f"Boluomao book page failed {url}: {e}")
+            return None
+        soup = BeautifulSoup(resp.text, 'lxml')
+
+        title = ''
+        t = soup.select_one('.bookDetail h1, .bookTitleRow h1, h1')
+        if t:
+            title = t.get_text(strip=True)
+
+        author = '未知'
+        a = soup.select_one('.bookDetail .author, .bookTitleRow .author')
+        if a:
+            text = a.get_text(strip=True)
+            if text:
+                author = text
+
+        cover_url = ''
+        img = soup.select_one('.bookDetail .pic img, .pic img')
+        if img and img.get('src'):
+            cover_url = img.get('src')
+
+        category = '未分类'
+        status = '连载中'
+        info_dls = soup.select('.bookDetail .info dl')
+        for dl in info_dls:
+            dt = dl.find('dt')
+            if not dt:
+                continue
+            label = dt.get_text(strip=True)
+            dd = dl.find('dd')
+            val = dd.get_text(' ', strip=True) if dd else ''
+            if '分类' in label:
+                category = val or '未分类'
+            elif '状态' in label:
+                status = val or '连载中'
+
+        description = ''
+        obf_html = soup.select_one('.introBox .obf-html[data-obf-html], .obf-html[data-obf-html]')
+        if obf_html:
+            description = _boluomao_decode(obf_html.get('data-obf-html'))
+        if not description:
+            intro = soup.select_one('.introBox, #bookIntro')
+            if intro:
+                description = intro.get_text(strip=True)[:500]
+
+        chapters = []
+        seen = set()
+        base_host = urlparse(url).scheme + '://' + (urlparse(url).hostname or '')
+        base_book_url = url
+
+        def _parse_page(page_url):
+            try:
+                # 分页请求间小间隔，平衡并发与防封
+                time.sleep(random.uniform(0.1, 0.2))
+                r = _boluomao_get(page_url, referer=base_book_url, timeout=15)
+                r.encoding = 'utf-8'
+                s = BeautifulSoup(r.text, 'lxml')
+                dire = s.select_one('.direBox')
+                if not dire:
+                    return False
+                for a in dire.select('.direList .name a, .direList a[href*="/read/"]'):
+                    href = a.get('href', '')
+                    href_text = a.get_text(strip=True)
+                    if not href or not href_text:
+                        continue
+                    full = href if href.startswith('http') else base_host + href
+                    if full in seen:
+                        continue
+                    seen.add(full)
+                    chapters.append({
+                        'index': len(chapters),
+                        'title': href_text,
+                        'url': full
+                    })
+                return True
+            except Exception as e:
+                logger.warning(f"Boluomao page parse failed {page_url}: {e}")
+                return False
+
+        dire = soup.select_one('.direBox')
+        if dire:
+            for a in dire.select('.direList .name a, .direList a[href*="/read/"]'):
+                href = a.get('href', '')
+                href_text = a.get_text(strip=True)
+                if not href or not href_text:
+                    continue
+                full = href if href.startswith('http') else base_host + href
+                if full in seen:
+                    continue
+                seen.add(full)
+                chapters.append({
+                    'index': len(chapters),
+                    'title': href_text,
+                    'url': full
+                })
+
+            cp_links = dire.select('.page2 a[href*="cp="], .page-range-list a[href*="cp="]')
+            total_pages = 1
+            for a in cp_links:
+                m = re.search(r'cp=(\d+)', a.get('href', ''))
+                if m:
+                    total_pages = max(total_pages, int(m.group(1)))
+            for cp in range(2, total_pages + 1):
+                sep = '&' if '?' in base_book_url else '?'
+                _parse_page(f'{base_book_url}{sep}cp={cp}')
+
+        if not chapters:
+            return None
+
+        return {
+            'title': title, 'author': author, 'cover_url': cover_url,
+            'description': description, 'book_url': url,
+            'category': category, 'status': status, 'chapters': chapters
+        }
+
+
+ADAPTERS = [BiqugeAdapter(), TianyaAdapter(), BoluomaoAdapter(), GenericNovelAdapter()]
 
 
 def crawl_book_source(source, speed='normal'):
@@ -500,6 +779,27 @@ def crawl_book_source(source, speed='normal'):
 
     if not adapter:
         raise ValueError(f'不支持的站点: {source.url}')
+
+    # 菠萝猫站点爬取前尝试自动登录（加速且避免部分章节受登录限制）
+    try:
+        hostname = (urlparse(source.url).hostname or '').lower()
+        if 'boluomao' in hostname and not boluomao_is_logged_in():
+            import os
+            u = os.getenv('BOLUOMAO_USERNAME', 'geniuswh@163.com')
+            p = os.getenv('BOLUOMAO_PASSWORD', 'geniuswh')
+            ok, msg = boluomao_login(u, p, base_url=f'https://{hostname}')
+            if ok:
+                logger.info(f"Boluomao auto-login for crawl: {msg}")
+    except Exception as e:
+        logger.warning(f"Boluomao auto-login failed: {e}")
+
+    # 增量优化：向适配器注入已入库的书籍 URL，避免重复爬取章节目录
+    if isinstance(adapter, BoluomaoAdapter):
+        try:
+            existing_urls = {b.book_url for b in Book.query.filter_by(source_id=source.id).all()}
+            adapter._existing_urls = existing_urls
+        except Exception as e:
+            logger.warning(f"Boluomao existing urls inject failed: {e}")
 
     result = adapter.parse(source)
     book_count = 0
@@ -542,7 +842,11 @@ def crawl_book_source(source, speed='normal'):
 
 def crawl_chapter_content(url, referer=None):
     """爬取单章内容"""
-    resp = anti_block.get(url, referer=referer)
+    hostname = (urlparse(url).hostname or '').lower()
+    if 'boluomao' in hostname:
+        resp = _boluomao_get(url, referer=referer)
+    else:
+        resp = anti_block.get(url, referer=referer)
 
     # 检测编码
     content_type = resp.headers.get('Content-Type', '')
@@ -558,6 +862,11 @@ def crawl_chapter_content(url, referer=None):
             resp.encoding = 'gbk'
 
     soup = BeautifulSoup(resp.text, 'lxml')
+
+    # 菠萝猫站点：正文为 obf-text 混淆内容，需要解密
+    hostname = (urlparse(url).hostname or '').lower()
+    if 'boluomao' in hostname:
+        return _crawl_boluomao_chapter(soup, url=url, referer=referer)
 
     for tag in soup(['script', 'style', 'ins', 'iframe']):
         tag.decompose()
@@ -594,6 +903,64 @@ def crawl_chapter_content(url, referer=None):
     if all_texts:
         largest = max(all_texts, key=lambda t: len(t.strip()))
         return largest.strip()
+
+    return '无法获取章节内容'
+
+
+def _crawl_boluomao_chapter(soup, url=None, referer=None):
+    """解析菠萝猫章节页正文（混淆内容解密），支持 ?p=N 分页合并"""
+    parts = []
+
+    def _extract(_soup):
+        _obf = _soup.select('.obf-text[data-obf]')
+        _res = []
+        for _p in _obf:
+            _dec = _boluomao_decode(_p.get('data-obf'))
+            if _dec:
+                _res.append(_dec)
+        return _res
+
+    parts = _extract(soup)
+
+    # 分页：存在"下一页"链接时继续爬取并合并
+    current_soup = soup
+    current_url = url
+    page = 2
+    max_page = 30
+    while parts and current_url and page <= max_page:
+        next_href = None
+        for a in current_soup.select('a[href*="?p="], a[href*="page="], a[href*="&p="]'):
+            if '下一页' in a.get_text(strip=True):
+                next_href = a.get('href', '')
+                break
+        if not next_href:
+            break
+        next_url = urljoin(current_url, next_href)
+        try:
+            r = _boluomao_get(next_url, referer=referer, timeout=15)
+            r.encoding = 'utf-8'
+            next_soup = BeautifulSoup(r.text, 'lxml')
+            next_parts = _extract(next_soup)
+            if not next_parts:
+                break
+            parts.extend(next_parts)
+            current_soup = next_soup
+            current_url = next_url
+            page += 1
+            time.sleep(random.uniform(0.3, 0.6))
+        except Exception as e:
+            logger.warning(f"Boluomao pagination failed {next_url}: {e}")
+            break
+
+    if parts:
+        return '\n'.join(parts)
+
+    # 兜底：尝试常见正文容器
+    content_div = soup.select_one('.conC .content, .content')
+    if content_div:
+        text = content_div.get_text(separator='\n', strip=True)
+        if text:
+            return text
 
     return '无法获取章节内容'
 

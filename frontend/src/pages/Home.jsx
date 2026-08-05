@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Input, Select, Card, Tag, Empty, Spin, Row, Col, Pagination, App, Dropdown, Modal, Form, Button, Space } from 'antd'
 import {
   SearchOutlined, BookOutlined, DeleteOutlined, FolderOutlined,
-  PlusOutlined, SwapOutlined, MoreOutlined
+  PlusOutlined, SwapOutlined, MoreOutlined, DownloadOutlined
 } from '@ant-design/icons'
 import { booksAPI } from '../api'
 
@@ -159,6 +159,26 @@ export default function Home() {
     }
   }
 
+  const handleDownloadTxt = async (book) => {
+    const hide = message.loading(`正在生成《${book.title}》TXT，请稍候...`, 0)
+    try {
+      const { data } = await booksAPI.exportBookTxt(book.id)
+      const url = URL.createObjectURL(data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${book.title}.txt`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      message.success('下载成功')
+    } catch (err) {
+      message.error(err.response?.data?.msg || '下载失败')
+    } finally {
+      hide()
+    }
+  }
+
   const getBookMenuItems = (book) => [
     {
       key: 'switch',
@@ -166,6 +186,14 @@ export default function Home() {
       label: '搜索换源',
       onClick: () => {
         handleSearchSources(book)
+      }
+    },
+    {
+      key: 'download',
+      icon: <DownloadOutlined />,
+      label: '下载TXT',
+      onClick: () => {
+        handleDownloadTxt(book)
       }
     },
     {

@@ -103,6 +103,28 @@ npm run dev
 
 打开浏览器访问 http://localhost:5173
 
+## 默认账号
+
+系统首次运行后可通过注册页创建账号，也可以直接使用以下已存在的账号：
+
+| 用户名 | 密码 | 说明 |
+|--------|------|------|
+| `testuser` | `testuser123` | 主要使用账号，已配置书源与书籍 |
+| `admin` | （未设置） | 管理员账号，密码需注册时设置 |
+| `geniuswh` | （未设置） | 备用账号 |
+
+> 密码为哈希存储，无法查看明文。若忘记密码，可通过 `werkzeug.security.generate_password_hash` 重置。
+
+### 已内置书源
+
+| 书源名 | 站点 | 适配器 |
+|--------|------|--------|
+| 笔趣阁 | 各类笔趣阁镜像站 | BiqugeAdapter |
+| 天涯 | 天涯书库 | TianyaAdapter |
+| 菠萝猫 | https://www.boluomao1.com | BoluomaoAdapter |
+
+菠萝猫站点爬取需要登录（第 101 章起需登录态），已集成自动验证码识别登录功能，账号配置在 `backend/scraper/crawler.py` 的 `boluomao_login()` 中。
+
 ## API 概览
 
 | 方法 | 路径 | 说明 |

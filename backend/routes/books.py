@@ -1,7 +1,8 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import or_
 from datetime import datetime
+from urllib.parse import quote
 import time
 
 from __init__ import db
@@ -514,3 +515,61 @@ def set_book_group(book_id):
     book.group_id = group_id
     db.session.commit()
     return jsonify(msg='分组设置成功')
+
+
+@books_bp.route('/<int:book_id>/export', methods=['GET'])
+@jwt_required()
+def export_book_txt(book_id):
+    """导出书籍为 TXT 文件下载"""
+    user_id = int(get_jwt_identity())
+    book = Book.query.join(BookSource).filter(Book.id == book_id, BookSource.user_id == user_id).first()
+    if not book:
+        return jsonify(msg='书籍不存在'), 404
+
+    chapters = Chapter.query.filter_by(book_id=book_id).order_by(Chapter.chapter_index).all()
+    if not chapters:
+        return jsonify(msg='该书籍暂无章节'), 400
+
+    lines = [
+        book.title or '未命名书籍',
+        f'作者：{book.author or "未知"}',
+        f'来源：{book.source.name if book.source else "未知"}',
+    ]
+    if book.description:
+        import re
+        desc = re.sub(r'<[^>]+>', '', book.description).strip()
+        lines.append(f'简介：{desc}')
+    lines.append('')
+
+    # 统计需要实时爬取的章节数
+    uncached = [c for c in chapters if not c.content]
+    if uncached:
+        lines.append(f'（以下 {len(uncached)} 章正文未缓存，正在实时获取，可能需要一些时间...）')
+        lines.append('')
+
+    for ch in chapters:
+        lines.append('')
+        lines.append(ch.title)
+        lines.append('')
+        content = ch.content
+        if not content:
+            # 实时爬取未缓存的章节
+            try:
+                content = crawl_chapter_content(ch.url, referer=book.book_url)
+                if content and content != '无法获取章节内容':
+                    ch.content = content
+                    db.session.commit()
+                else:
+                    content = ''
+            except Exception:
+                content = ''
+        if content:
+            lines.append(content)
+
+    text = '\n'.join(lines)
+    filename = quote(f'{book.title}.txt')
+    return Response(
+        text,
+        mimetype='text/plain; charset=utf-8',
+        headers={'Content-Disposition': f"attachment; filename*=UTF-8''{filename}"}
+    )

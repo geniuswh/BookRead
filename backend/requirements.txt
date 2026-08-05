@@ -7,3 +7,4 @@ requests==2.31.0
 lxml==5.1.0
 werkzeug==3.0.1
 fake-useragent==2.2.0
+ddddocr==1.4.7
